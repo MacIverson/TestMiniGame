@@ -26,6 +26,50 @@ bool collides(const Motion& motion1, const Motion& motion2)
 	return false;
 }
 
+bool circlesIntersect(const Motion& motion1, const Motion& motion2) {
+	float dist = sqrt(pow(motion1.position.x - motion2.position.x, 2) + pow(motion1.position.y - motion2.position.y, 2));
+	if (dist < 50) {
+		return true;
+	}
+	return false;
+}
+
+void handleMeshWallCollisions(Entity e, float window_height_px, float window_width_px) {
+	Mesh* salmonMeshPointer = registry.meshPtrs.get(e);
+	Motion& salmonMotion = registry.motions.get(e);
+	Transform transform;
+	transform.translate(salmonMotion.position);
+	transform.rotate(salmonMotion.angle);
+	transform.scale(salmonMotion.scale);
+
+	for (int i = 0; i < salmonMeshPointer->vertices.size(); i++) {
+		ColoredVertex vertex = salmonMeshPointer->vertices[i];
+		vec3 pos = vertex.position;
+		vec3 globalPos = transform.mat * pos;
+		int globalY = globalPos.y + salmonMotion.position.y;
+		int globalX = globalPos.x + salmonMotion.position.x;
+		if (globalY < 0 && salmonMotion.velocity.y <= 0) {
+			if (salmonMotion.velocity.y == 0) {
+				salmonMotion.velocity.y = 100;
+			}
+			else {
+				salmonMotion.velocity.y *= -1;
+			}
+		}
+		if (globalY > window_height_px && salmonMotion.velocity.y >= 0) {
+			if (salmonMotion.velocity.y == 0) {
+				salmonMotion.velocity.y = -100;
+			}
+			else {
+				salmonMotion.velocity.y *= -1;
+			}
+		}
+		if (globalX < 0 || (globalX > window_width_px && salmonMotion.velocity.x > 0)) {
+			salmonMotion.velocity.x *= -1;
+		}
+	}
+}
+
 void PhysicsSystem::step(float elapsed_ms, float window_width_px, float window_height_px)
 {
 	// Move fish based on how much time has passed, this is to (partially) avoid
@@ -57,44 +101,28 @@ void PhysicsSystem::step(float elapsed_ms, float window_width_px, float window_h
 				continue;
 
 			Motion& motion_j = motion_container.components[j];
-			if (collides(motion_i, motion_j))
-			{
-				Entity entity_j = motion_container.entities[j];
+			Entity entity_j = motion_container.entities[j];
+			if (registry.softShells.has(entity_i) && registry.softShells.has(entity_j)) {
+				// rocks are colliding, use circles to calcualte collisions
+				if (circlesIntersect(motion_i, motion_j)) {
+					registry.collisions.emplace_with_duplicates(entity_i, entity_j);
+				}
+			} 
+			else if (collides(motion_i, motion_j)) {				
 				// Create a collisions event
 				// We are abusing the ECS system a bit in that we potentially insert muliple collisions for the same entity
 				registry.collisions.emplace_with_duplicates(entity_i, entity_j);
-				registry.collisions.emplace_with_duplicates(entity_j, entity_i);
+				//registry.collisions.emplace_with_duplicates(entity_j, entity_i);
 			}
 		}
 	}
 
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-	// TODO A2: HANDLE SALMON - WALL collisions HERE
-	// DON'T WORRY ABOUT THIS UNTIL ASSIGNMENT 2
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-	for (uint i = 0; i < registry.softShells.size(); i++) {
-		Mesh* salmonMeshPointer = registry.meshPtrs.get(registry.softShells.entities[i]);
-		Motion& salmonMotion = registry.motions.get(registry.softShells.entities[i]);
-		Transform transform;
-		transform.translate(salmonMotion.position);
-		transform.rotate(salmonMotion.angle);
-		transform.scale(salmonMotion.scale);
-
-		for (int i = 0; i < salmonMeshPointer->vertices.size(); i++) {
-			ColoredVertex vertex = salmonMeshPointer->vertices[i];
-			vec3 pos = vertex.position;
-			vec3 globalPos = transform.mat * pos;
-			int globalY = globalPos.y + salmonMotion.position.y;
-			int globalX = globalPos.x + salmonMotion.position.x;
-			if (globalY < 0 || globalY > window_height_px) {
-				salmonMotion.velocity.y *= -1;
-			}
-			if (globalX < 0 || (globalX > window_width_px && salmonMotion.velocity.x > 0)) {
-				salmonMotion.velocity.x *= -1;
-			}
-		}
+	// handle rock - wall collisions here
+	for (Entity e : registry.softShells.entities) {
+		handleMeshWallCollisions(e, window_height_px, window_width_px);
 	}
-	
+	// handle player - wall collisions here
+	handleMeshWallCollisions(registry.players.entities[0], window_height_px, window_width_px);
 
 	// you may need the following quantities to compute wall positions
 	(float)window_width_px; (float)window_height_px;

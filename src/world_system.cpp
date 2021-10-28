@@ -11,7 +11,7 @@
 // Game configuration
 const size_t MAX_TURTLES = 15;
 const size_t MAX_FISH = 5;
-const size_t MAX_SALMON = 15;
+const size_t MAX_SALMON = 30;
 const size_t SALMON_DELAY_MS = 2000 * 3;
 const size_t TURTLE_DELAY_MS = 2000 * 3;
 const size_t FISH_DELAY_MS = 5000 * 3;
@@ -155,7 +155,7 @@ bool WorldSystem::step(float elapsed_ms_since_last_update) {
 	}
 
 	// spawning new salmon
-	next_salmon_spawn -= elapsed_ms_since_last_update * current_speed;
+	next_salmon_spawn -= elapsed_ms_since_last_update * current_speed * 3;
 	if (registry.softShells.components.size() <= MAX_SALMON && next_salmon_spawn < 0.f) {
 		// reset timer
 		next_salmon_spawn = (SALMON_DELAY_MS / 2) + uniform_dist(rng) * (SALMON_DELAY_MS / 2);
@@ -167,9 +167,12 @@ bool WorldSystem::step(float elapsed_ms_since_last_update) {
 			vec2(screen_width + 200.f, // spawn off-screen
 				50.f + uniform_dist(rng) * (screen_height - 100.f));
 		float randomY = uniform_dist(rng);
-		if (randomY < 0.5) randomY *= -1;
-		randomY *= 200;
-		motion.velocity = vec2(-200.f, randomY);
+		if (randomY < 0.5) {
+			motion.velocity = vec2(-200.f, -200);
+		}
+		else {
+			motion.velocity = vec2(-200.f, 200);
+		}
 	}
 
 	// Spawning new turtles
@@ -245,10 +248,13 @@ void WorldSystem::restart_game() {
 	registry.list_all_components();
 
 	// Create a new salmon
-	player_salmon = createSalmon(renderer, { 100, 200 });
+	player_salmon = createSalmon(renderer, {100, 200});
 	registry.players.emplace(player_salmon);
 	registry.softShells.remove(player_salmon);
-	registry.colors.insert(player_salmon, {1, 0.8f, 0.8f});
+	registry.colors.insert(player_salmon, {1, 0.8f, 0.8f}); 
+	registry.colors.get(player_salmon).r = 0;
+	registry.colors.get(player_salmon).g = 255;
+	registry.colors.get(player_salmon).b = 0;
 
 	// !! TODO A3: Enable static pebbles on the ground
 	// Create pebbles on the floor for reference
@@ -274,12 +280,61 @@ void WorldSystem::handle_collisions() {
 		Entity entity = collisionsRegistry.entities[i];
 		Entity entity_other = collisionsRegistry.components[i].other;
 
+		// check salmon - salmon collisions
+		if (registry.softShells.has(entity) && registry.softShells.has(entity_other)) {
+			Motion& motion1 = registry.motions.get(entity);
+			Motion& motion2 = registry.motions.get(entity_other);
+			float dist = sqrt(pow(motion1.position.x - motion2.position.x, 2) + pow(motion1.position.y - motion2.position.y, 2));
+			// source: https://www.youtube.com/watch?v=LPzyNOHY3A4
+			float overlap = 0.5f * (dist - 25 - 25); // Overlap between circles is the distance between centers minus both radii (half for resolution)
+			// displace (static resolution)
+			motion1.position.x -= overlap * (motion1.position.x - motion2.position.x) / dist;
+			motion1.position.y -= overlap * (motion1.position.y - motion2.position.y) / dist;
+			motion2.position.x += overlap * (motion1.position.x - motion2.position.x) / dist;
+			motion2.position.y += overlap * (motion1.position.y - motion2.position.y) / dist;
+			// (dynamic resolution)
+			// Normal
+			float nx = (motion2.position.x - motion1.position.x) / dist;
+			float ny = (motion2.position.y - motion1.position.y) / dist;
+			// Tangent
+			float tx = -ny;
+			float ty = nx;
+
+			// Dot Product Tangent
+			float dpTan1 = motion1.velocity.x * tx + motion1.velocity.y * ty;
+			float dpTan2 = motion2.velocity.x * tx + motion2.velocity.y * ty;
+
+			// Dot Product Normal
+			float dpNorm1 = motion1.velocity.x * nx + motion1.velocity.y * ny;
+			float dpNorm2 = motion2.velocity.x * nx + motion2.velocity.y * ny;
+
+			motion1.velocity.x = tx * dpTan1 + nx;
+			motion1.velocity.y = ty * dpTan1 + ny;
+			motion2.velocity.x = tx * dpTan2 + nx;
+			motion2.velocity.y = ty * dpTan2 + ny;
+			
+			float mag1 = sqrt(motion1.velocity.x * motion1.velocity.x + motion1.velocity.y * motion1.velocity.y);
+			if (mag1 < 100) {
+				motion1.velocity *= 2;
+			}
+			float mag2 = sqrt(motion2.velocity.x * motion2.velocity.x + motion2.velocity.y * motion2.velocity.y);
+			if (mag2 < 100) {
+				motion2.velocity *= 2;
+			}
+			/*
+			motion1.velocity.x = motion1.velocity.x * 200 / mag1;
+			motion1.velocity.y = motion1.velocity.y * 100 / mag1;
+			motion2.velocity.x = motion2.velocity.x * 200 / mag2;
+			motion2.velocity.y = motion2.velocity.y * 100 / mag2;
+			*/
+		}
+
 		// For now, we are only interested in collisions that involve the salmon
 		if (registry.players.has(entity)) {
 			//Player& player = registry.players.get(entity);
 
 			// Checking Player - HardShell collisions
-			if (registry.hardShells.has(entity_other)) {
+			if (registry.softShells.has(entity_other)) {
 				// initiate death unless already dying
 				if (!registry.deathTimers.has(entity)) {
 					// Scream, reset timer, and make the salmon sink
@@ -287,6 +342,9 @@ void WorldSystem::handle_collisions() {
 					Mix_PlayChannel(-1, salmon_dead_sound, 0);
 					registry.motions.get(entity).angle = 3.1415f;
 					registry.motions.get(entity).velocity = { 0, 80 };
+					registry.colors.get(entity).r = 255;
+					registry.colors.get(entity).g = 0;
+					registry.colors.get(entity).b = 0;
 
 					// !!! TODO A1: change the salmon color on death
 				}
@@ -348,6 +406,50 @@ void WorldSystem::on_key(int key, int, int action, int mod) {
 		printf("Current speed = %f\n", current_speed);
 	}
 	current_speed = fmax(0.f, current_speed);
+
+	// Moving the Salmon (if not dead)	
+	if (registry.deathTimers.entities.empty()) {
+		// Left
+		if (key == GLFW_KEY_LEFT) {
+			Motion& salmonMotion = registry.motions.get(player_salmon);
+			if (action == GLFW_RELEASE) {
+				salmonMotion.velocity.x = 0;
+			}
+			else {
+				salmonMotion.velocity.x = -100;
+			}
+		}
+		// Right
+		if (key == GLFW_KEY_RIGHT) {
+			Motion& salmonMotion = registry.motions.get(player_salmon);
+			if (action == GLFW_RELEASE) {
+				salmonMotion.velocity.x = 0;
+			}
+			else if (action == GLFW_PRESS) {
+				salmonMotion.velocity.x = 100;
+			}
+		}
+		// Up
+		if (key == GLFW_KEY_UP) {
+			Motion& salmonMotion = registry.motions.get(player_salmon);
+			if (action == GLFW_RELEASE) {
+				salmonMotion.velocity.y = 0;
+			}
+			else {
+				salmonMotion.velocity.y = -100;
+			}
+		}
+		// Down
+		if (key == GLFW_KEY_DOWN) {
+			Motion& salmonMotion = registry.motions.get(player_salmon);
+			if (action == GLFW_RELEASE) {
+				salmonMotion.velocity.y = 0;
+			}
+			else {
+				salmonMotion.velocity.y = +100;
+			}
+		}
+	}
 }
 
 void WorldSystem::on_mouse_move(vec2 mouse_position) {
