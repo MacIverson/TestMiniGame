@@ -271,6 +271,63 @@ void WorldSystem::restart_game() {
 	*/
 }
 
+void handleRockPlayerBounce(Entity entity, Entity entity_other) {
+	Motion& motion1 = registry.motions.get(entity);
+	Motion& motion2 = registry.motions.get(entity_other);
+
+	vec2 vel1temp = motion1.velocity;
+	motion1.velocity = motion2.velocity;
+	motion2.velocity = vel1temp;
+}
+
+void handleRockBounce(Entity entity, Entity entity_other) {
+	Motion& motion1 = registry.motions.get(entity);
+	Motion& motion2 = registry.motions.get(entity_other);
+	float dist = sqrt(pow(motion1.position.x - motion2.position.x, 2) + pow(motion1.position.y - motion2.position.y, 2));
+	// source: https://www.youtube.com/watch?v=LPzyNOHY3A4
+	float overlap = 0.5f * (dist - 25 - 25); // Overlap between circles is the distance between centers minus both radii (half for resolution)
+	// displace (static resolution)
+	motion1.position.x -= overlap * (motion1.position.x - motion2.position.x) / dist;
+	motion1.position.y -= overlap * (motion1.position.y - motion2.position.y) / dist;
+	motion2.position.x += overlap * (motion1.position.x - motion2.position.x) / dist;
+	motion2.position.y += overlap * (motion1.position.y - motion2.position.y) / dist;
+	// (dynamic resolution)
+	// Normal
+	float nx = (motion2.position.x - motion1.position.x) / dist;
+	float ny = (motion2.position.y - motion1.position.y) / dist;
+	// Tangent
+	float tx = -ny;
+	float ty = nx;
+
+	// Dot Product Tangent
+	float dpTan1 = motion1.velocity.x * tx + motion1.velocity.y * ty;
+	float dpTan2 = motion2.velocity.x * tx + motion2.velocity.y * ty;
+
+	// Dot Product Normal
+	float dpNorm1 = motion1.velocity.x * nx + motion1.velocity.y * ny;
+	float dpNorm2 = motion2.velocity.x * nx + motion2.velocity.y * ny;
+
+	motion1.velocity.x = tx * dpTan1 + nx;
+	motion1.velocity.y = ty * dpTan1 + ny;
+	motion2.velocity.x = tx * dpTan2 + nx;
+	motion2.velocity.y = ty * dpTan2 + ny;
+
+	float mag1 = sqrt(motion1.velocity.x * motion1.velocity.x + motion1.velocity.y * motion1.velocity.y);
+	if (mag1 < 100) {
+		motion1.velocity *= 2;
+	}
+	float mag2 = sqrt(motion2.velocity.x * motion2.velocity.x + motion2.velocity.y * motion2.velocity.y);
+	if (mag2 < 100) {
+		motion2.velocity *= 2;
+	}
+	/*
+	motion1.velocity.x = motion1.velocity.x * 200 / mag1;
+	motion1.velocity.y = motion1.velocity.y * 100 / mag1;
+	motion2.velocity.x = motion2.velocity.x * 200 / mag2;
+	motion2.velocity.y = motion2.velocity.y * 100 / mag2;
+	*/
+}
+
 // Compute collisions between entities
 void WorldSystem::handle_collisions() {
 	// Loop over all collisions detected by the physics system
@@ -282,51 +339,7 @@ void WorldSystem::handle_collisions() {
 
 		// check salmon - salmon collisions
 		if (registry.softShells.has(entity) && registry.softShells.has(entity_other)) {
-			Motion& motion1 = registry.motions.get(entity);
-			Motion& motion2 = registry.motions.get(entity_other);
-			float dist = sqrt(pow(motion1.position.x - motion2.position.x, 2) + pow(motion1.position.y - motion2.position.y, 2));
-			// source: https://www.youtube.com/watch?v=LPzyNOHY3A4
-			float overlap = 0.5f * (dist - 25 - 25); // Overlap between circles is the distance between centers minus both radii (half for resolution)
-			// displace (static resolution)
-			motion1.position.x -= overlap * (motion1.position.x - motion2.position.x) / dist;
-			motion1.position.y -= overlap * (motion1.position.y - motion2.position.y) / dist;
-			motion2.position.x += overlap * (motion1.position.x - motion2.position.x) / dist;
-			motion2.position.y += overlap * (motion1.position.y - motion2.position.y) / dist;
-			// (dynamic resolution)
-			// Normal
-			float nx = (motion2.position.x - motion1.position.x) / dist;
-			float ny = (motion2.position.y - motion1.position.y) / dist;
-			// Tangent
-			float tx = -ny;
-			float ty = nx;
-
-			// Dot Product Tangent
-			float dpTan1 = motion1.velocity.x * tx + motion1.velocity.y * ty;
-			float dpTan2 = motion2.velocity.x * tx + motion2.velocity.y * ty;
-
-			// Dot Product Normal
-			float dpNorm1 = motion1.velocity.x * nx + motion1.velocity.y * ny;
-			float dpNorm2 = motion2.velocity.x * nx + motion2.velocity.y * ny;
-
-			motion1.velocity.x = tx * dpTan1 + nx;
-			motion1.velocity.y = ty * dpTan1 + ny;
-			motion2.velocity.x = tx * dpTan2 + nx;
-			motion2.velocity.y = ty * dpTan2 + ny;
-			
-			float mag1 = sqrt(motion1.velocity.x * motion1.velocity.x + motion1.velocity.y * motion1.velocity.y);
-			if (mag1 < 100) {
-				motion1.velocity *= 2;
-			}
-			float mag2 = sqrt(motion2.velocity.x * motion2.velocity.x + motion2.velocity.y * motion2.velocity.y);
-			if (mag2 < 100) {
-				motion2.velocity *= 2;
-			}
-			/*
-			motion1.velocity.x = motion1.velocity.x * 200 / mag1;
-			motion1.velocity.y = motion1.velocity.y * 100 / mag1;
-			motion2.velocity.x = motion2.velocity.x * 200 / mag2;
-			motion2.velocity.y = motion2.velocity.y * 100 / mag2;
-			*/
+			handleRockBounce(entity, entity_other);
 		}
 
 		// For now, we are only interested in collisions that involve the salmon
@@ -338,26 +351,14 @@ void WorldSystem::handle_collisions() {
 				// initiate death unless already dying
 				if (!registry.deathTimers.has(entity)) {
 					// Scream, reset timer, and make the salmon sink
+					handleRockPlayerBounce(entity, entity_other);
 					registry.deathTimers.emplace(entity);
 					Mix_PlayChannel(-1, salmon_dead_sound, 0);
-					registry.motions.get(entity).angle = 3.1415f;
-					registry.motions.get(entity).velocity = { 0, 80 };
+					//registry.motions.get(entity).angle = 3.1415f;
+					//registry.motions.get(entity).velocity = { 0, 80 };
 					registry.colors.get(entity).r = 255;
 					registry.colors.get(entity).g = 0;
 					registry.colors.get(entity).b = 0;
-
-					// !!! TODO A1: change the salmon color on death
-				}
-			}
-			// Checking Player - SoftShell collisions
-			else if (registry.softShells.has(entity_other)) {
-				if (!registry.deathTimers.has(entity)) {
-					// chew, count points, and set the LightUp timer
-					registry.remove_all_components_of(entity_other);
-					Mix_PlayChannel(-1, salmon_eat_sound, 0);
-					++points;
-
-					// !!! TODO A1: create a new struct called LightUp in components.hpp and add an instance to the salmon entity by modifying the ECS registry
 				}
 			}
 		}
@@ -416,7 +417,7 @@ void WorldSystem::on_key(int key, int, int action, int mod) {
 				salmonMotion.velocity.x = 0;
 			}
 			else {
-				salmonMotion.velocity.x = -100;
+				salmonMotion.velocity.x = -200;
 			}
 		}
 		// Right
@@ -426,7 +427,7 @@ void WorldSystem::on_key(int key, int, int action, int mod) {
 				salmonMotion.velocity.x = 0;
 			}
 			else if (action == GLFW_PRESS) {
-				salmonMotion.velocity.x = 100;
+				salmonMotion.velocity.x = 200;
 			}
 		}
 		// Up
@@ -436,7 +437,7 @@ void WorldSystem::on_key(int key, int, int action, int mod) {
 				salmonMotion.velocity.y = 0;
 			}
 			else {
-				salmonMotion.velocity.y = -100;
+				salmonMotion.velocity.y = -200;
 			}
 		}
 		// Down
@@ -446,7 +447,7 @@ void WorldSystem::on_key(int key, int, int action, int mod) {
 				salmonMotion.velocity.y = 0;
 			}
 			else {
-				salmonMotion.velocity.y = +100;
+				salmonMotion.velocity.y = 200;
 			}
 		}
 	}

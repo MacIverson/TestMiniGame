@@ -26,7 +26,8 @@ bool collides(const Motion& motion1, const Motion& motion2)
 	return false;
 }
 
-bool circlesIntersect(const Motion& motion1, const Motion& motion2) {
+// calculate Rock - Rock collisions
+bool circlesCollide(const Motion& motion1, const Motion& motion2) {
 	float dist = sqrt(pow(motion1.position.x - motion2.position.x, 2) + pow(motion1.position.y - motion2.position.y, 2));
 	if (dist < 50) {
 		return true;
@@ -34,7 +35,26 @@ bool circlesIntersect(const Motion& motion1, const Motion& motion2) {
 	return false;
 }
 
+// calculate Player - Rock collisions
+// source: https://stackoverflow.com/questions/401847/circle-rectangle-collision-detection-intersection
+bool circleAndRectangleCollide(const Motion& playerMotion, const Motion& rockMotion) {
+	// salmon rectangle will have width of 100, height of 50
+	float circleDistanceX = abs(rockMotion.position.x - playerMotion.position.x);
+	if (circleDistanceX > 50 + 50) return false; // half rect width + circle radius
+	float circleDistanceY = abs(rockMotion.position.y - playerMotion.position.y);
+	if (circleDistanceY > 25 + 50) return false; // half rect height + circle radius
+
+	if (circleDistanceX <= 50) return true; // half rect width
+	if (circleDistanceY <= 25) return true; // half rect height
+
+	float cornerDistSqrd = pow(circleDistanceX - 50, 2) + pow(circleDistanceY - 25, 2);
+	return (cornerDistSqrd <= pow(50, 2));
+}
+
 void handleMeshWallCollisions(Entity e, float window_height_px, float window_width_px) {
+	if (registry.deathTimers.has(e)) {
+		return;
+	}
 	Mesh* salmonMeshPointer = registry.meshPtrs.get(e);
 	Motion& salmonMotion = registry.motions.get(e);
 	Transform transform;
@@ -104,10 +124,20 @@ void PhysicsSystem::step(float elapsed_ms, float window_width_px, float window_h
 			Entity entity_j = motion_container.entities[j];
 			if (registry.softShells.has(entity_i) && registry.softShells.has(entity_j)) {
 				// rocks are colliding, use circles to calcualte collisions
-				if (circlesIntersect(motion_i, motion_j)) {
+				if (circlesCollide(motion_i, motion_j)) {
 					registry.collisions.emplace_with_duplicates(entity_i, entity_j);
 				}
-			} 
+			}
+			else if (registry.players.has(entity_i) && registry.softShells.has(entity_j)) {
+				if (circleAndRectangleCollide(motion_i, motion_j)) {
+					registry.collisions.emplace_with_duplicates(entity_i, entity_j);
+				}
+			}
+			else if (registry.softShells.has(entity_i) && registry.players.has(entity_j)) {
+				if (circleAndRectangleCollide(motion_j, motion_i)) {
+					registry.collisions.emplace_with_duplicates(entity_i, entity_j);
+				}
+			}
 			else if (collides(motion_i, motion_j)) {				
 				// Create a collisions event
 				// We are abusing the ECS system a bit in that we potentially insert muliple collisions for the same entity
@@ -143,12 +173,14 @@ void PhysicsSystem::step(float elapsed_ms, float window_width_px, float window_h
 			Entity entity_i = motion_container.entities[i];
 
 			// visualize the radius with two axis-aligned lines
-			const vec2 bonding_box = get_bounding_box(motion_i);
+			/*const vec2 bonding_box = get_bounding_box(motion_i);
 			float radius = sqrt(dot(bonding_box/2.f, bonding_box/2.f));
 			vec2 line_scale1 = { motion_i.scale.x / 10, 2*radius };
 			Entity line1 = createLine(motion_i.position, line_scale1);
 			vec2 line_scale2 = { 2*radius, motion_i.scale.x / 10};
-			Entity line2 = createLine(motion_i.position, line_scale2);
+			Entity line2 = createLine(motion_i.position, line_scale2);*/
+			
+			Entity center = createLine(motion_i.position, { 5,5 });
 
 			// !!! TODO A2: implement debugging of bounding boxes and mesh
 		}
